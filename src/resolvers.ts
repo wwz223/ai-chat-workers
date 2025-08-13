@@ -40,8 +40,9 @@ async function callSiliconFlowAPI(
 	} = {}
 ): Promise<SiliconFlowResponse> {
 	const { temperature = 0.7, maxTokens = 512, topP = 0.7, topK = 50, frequencyPenalty = 0.5 } = options;
+	console.log('apiKey', apiKey);
 
-	const response = await fetch('https://api.siliconflow.com/v1/chat/completions', {
+	const response = await fetch('https://api.siliconflow.cn/v1/chat/completions', {
 		method: 'POST',
 		headers: {
 			Authorization: `Bearer ${apiKey}`,
@@ -145,3 +146,4 @@ export const resolvers = {
 	Mutation,
 	Subscription,
 };
+
