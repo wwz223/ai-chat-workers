@@ -56,7 +56,6 @@ export default {
 				});
 			}
 
-			console.log('env.SILICONFLOW_API_KEY', env.SILICONFLOW_API_KEY);
 			// 检查环境变量
 			if (!env.SILICONFLOW_API_KEY) {
 				return new Response(
