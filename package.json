@@ -10,8 +10,7 @@
 		"cf-typegen": "wrangler types"
 	},
 	"dependencies": {
-		"graphql": "^16.8.1",
-		"graphql-yoga": "^5.1.1"
+		"graphql": "^16.8.1"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.8.19",
