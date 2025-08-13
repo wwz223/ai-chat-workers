@@ -1,97 +1,115 @@
 /**
- * Cloudflare Worker for calling SiliconFlow's Qwen2.5-7B-Instruct model
- * Supports CORS for frontend requests
- * Expects a POST request with a JSON body containing a "prompt" field
- * Requires SILICONFLOW_API_KEY environment variable
- * Returns the model's response as JSON
+ * Cloudflare Worker GraphQL服务
+ * 使用GraphQL调用SiliconFlow的Qwen2.5-7B-Instruct模型
+ * 支持CORS，提供GraphQL查询、变更和订阅操作
+ * 需要SILICONFLOW_API_KEY环境变量
  */
 
+import { createYoga } from 'graphql-yoga';
+import { typeDefs } from './schema';
+import { resolvers } from './resolvers';
+
+// 定义环境类型
+interface Env {
+  SILICONFLOW_API_KEY: string;
+}
+
+// 创建GraphQL Yoga服务器
+const yoga = createYoga({
+  schema: {
+    typeDefs,
+    resolvers,
+  },
+  // 启用GraphQL Playground（开发环境）
+  graphiql: true,
+  // CORS配置
+  cors: {
+    origin: '*', // 生产环境建议设置为具体的前端域名
+    credentials: true,
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  },
+  // 自定义context
+  context: async ({ request, env }) => ({
+    request,
+    env,
+  }),
+  // 错误处理
+  maskedErrors: false, // 开发环境显示详细错误，生产环境建议设为true
+});
+
 export default {
-    async fetch(request: Request, env: { SILICONFLOW_API_KEY: string }, ctx: ExecutionContext) {
-      // 定义 CORS 头
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    try {
+      // 设置CORS头部
       const corsHeaders = {
-        'Access-Control-Allow-Origin': '*', // 允许所有来源，生产环境可改为具体前端域名
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Credentials': 'true',
       };
-  
-      // 处理 OPTIONS 请求（CORS 预检）
+
+      // 处理OPTIONS预检请求
       if (request.method === 'OPTIONS') {
         return new Response(null, {
           status: 204,
           headers: corsHeaders,
         });
       }
-  
-      // 确保是 POST 请求
-      if (request.method !== 'POST') {
-        return new Response('Method Not Allowed. Use POST.', {
-          status: 405,
-          headers: corsHeaders,
-        });
-      }
-  
-      try {
-        // 解析 JSON 请求体
-        const body = await request.json() as { prompt: string };
-        const userPrompt = body.prompt;
-  
-        // 验证输入
-        if (!userPrompt || typeof userPrompt !== 'string') {
-          return new Response('Bad Request: Missing or invalid "prompt" field', {
-            status: 400,
-            headers: corsHeaders,
-          });
-        }
-  
-        // 确保 API 密钥已配置
-        const apiKey = env.SILICONFLOW_API_KEY as string;
-        if (!apiKey) {
-          return new Response('Server Error: API key not configured', {
-            status: 500,
-            headers: corsHeaders,
-          });
-        }
-  
-        // 调用 SiliconFlow 的 Qwen2.5-7B-Instruct 模型
-        const response = await fetch('https://api.siliconflow.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'Qwen/Qwen2.5-7B-Instruct',
-            messages: [
-              { role: 'system', content: 'You are a helpful assistant.' },
-              { role: 'user', content: userPrompt },
-            ],
-            max_tokens: 512,
-            temperature: 0.7,
-            top_p: 0.7,
-            top_k: 50,
-            frequency_penalty: 0.5,
-            stream: false,
+
+      // 检查环境变量
+      if (!env.SILICONFLOW_API_KEY) {
+        return new Response(
+          JSON.stringify({
+            errors: [{ message: 'Server configuration error: API key not found' }],
           }),
-        });
-  
-        if (!response.ok) {
-          throw new Error(`SiliconFlow API error: ${response.statusText}`);
-        }
-  
-        const data = await response.json() as { choices: { message: { content: string } }[] };
-        return new Response(JSON.stringify({ generated_text: data.choices[0].message.content }), {
+          {
+            status: 500,
+            headers: {
+              'Content-Type': 'application/json',
+              ...corsHeaders,
+            },
+          }
+        );
+      }
+
+      // 将env添加到request对象供GraphQL使用
+      (request as any).env = env;
+
+      // 委托给GraphQL Yoga处理
+      const response = await yoga.fetch(request, env, ctx);
+
+      // 确保响应包含CORS头
+      const newResponse = new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: {
+          ...Object.fromEntries(response.headers.entries()),
+          ...corsHeaders,
+        },
+      });
+
+      return newResponse;
+    } catch (error) {
+      console.error('Worker error:', error);
+      
+      return new Response(
+        JSON.stringify({
+          errors: [{ 
+            message: error instanceof Error ? error.message : 'Internal server error',
+            extensions: { code: 'INTERNAL_ERROR' }
+          }],
+        }),
+        {
+          status: 500,
           headers: {
             'Content-Type': 'application/json',
-            ...corsHeaders, // 确保成功响应包含 CORS 头
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
           },
-        });
-      } catch (error) {
-        console.error('Error calling SiliconFlow API:', error);
-        return new Response(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`, {
-          status: 500,
-          headers: corsHeaders, // 确保错误响应包含 CORS 头
-        });
-      }
-    },
-  };
+        }
+      );
+    }
+  },
+};
